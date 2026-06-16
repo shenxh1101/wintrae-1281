@@ -1,6 +1,6 @@
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
-import type { Candidate, Interviewer, ImportResult, Availability, MeetingType } from '../types';
+import type { Candidate, Interviewer, Position, InterviewRound, ImportResult, Availability, MeetingType } from '../types';
 import { generateId } from '../utils/dateUtils';
 import { validateEmail, validatePhone } from '../utils/stringUtils';
 
@@ -215,4 +215,85 @@ export const generateInterviewerTemplate = (): string => {
 
   const csvContent = [headers.join(','), ...sampleData.map((row) => row.join(','))].join('\n');
   return csvContent;
+};
+
+export const generatePositionsFromData = (
+  candidates: Candidate[],
+  interviewers: Interviewer[]
+): Position[] => {
+  const positionMap = new Map<string, { name: string; department: string }>();
+
+  candidates.forEach((candidate) => {
+    if (candidate.positionId && !positionMap.has(candidate.positionId)) {
+      positionMap.set(candidate.positionId, {
+        name: candidate.positionId,
+        department: '待定',
+      });
+    }
+  });
+
+  interviewers.forEach((interviewer) => {
+    interviewer.positions.forEach((posId) => {
+      if (posId && !positionMap.has(posId)) {
+        positionMap.set(posId, {
+          name: posId,
+          department: '待定',
+        });
+      }
+    });
+  });
+
+  return Array.from(positionMap.entries()).map(([id, data]) => ({
+    id,
+    name: data.name,
+    department: data.department,
+    description: '',
+  }));
+};
+
+export const generateInterviewRoundsFromData = (
+  positions: Position[],
+  interviewers: Interviewer[]
+): InterviewRound[] => {
+  const rounds: InterviewRound[] = [];
+
+  positions.forEach((position) => {
+    const positionInterviewers = interviewers.filter((i) =>
+      i.positions.includes(position.id)
+    );
+    const roles = Array.from(new Set(positionInterviewers.map((i) => i.role)));
+
+    if (roles.length === 0) {
+      rounds.push({
+        id: `round-${position.id}-1`,
+        positionId: position.id,
+        roundNumber: 1,
+        roundName: '初面',
+        duration: 60,
+        requiredInterviewerRoles: [],
+      });
+    } else {
+      roles.forEach((role, index) => {
+        rounds.push({
+          id: `round-${position.id}-${index + 1}`,
+          positionId: position.id,
+          roundNumber: index + 1,
+          roundName: `${role}面`,
+          duration: 60,
+          requiredInterviewerRoles: [role],
+        });
+      });
+    }
+
+    rounds.push({
+      id: `round-${position.id}-hr`,
+      positionId: position.id,
+      roundNumber: roles.length + 1,
+      roundName: 'HR面',
+      duration: 30,
+      requiredInterviewerRoles: ['HR'],
+    });
+  });
+
+  return rounds;
 };

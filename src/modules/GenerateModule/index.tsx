@@ -127,10 +127,10 @@ export const GenerateModule: React.FC = () => {
         {!isReady && <Badge variant="warning">请先完成核对</Badge>}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
         <StatsCard
           title="待生成邮件"
-          value={schedules.length * 2}
+          value={schedules.length * 3}
           icon={<Mail size={24} />}
           variant="info"
         />
@@ -150,6 +150,12 @@ export const GenerateModule: React.FC = () => {
           title="面试官通知"
           value={emailTypeCount.interviewer_notice || 0}
           icon={<FileText size={24} />}
+          variant="default"
+        />
+        <StatsCard
+          title="改期模板"
+          value={emailTypeCount.reschedule || 0}
+          icon={<RefreshCw size={24} />}
           variant="default"
         />
       </div>

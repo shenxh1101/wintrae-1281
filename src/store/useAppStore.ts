@@ -1,10 +1,12 @@
 import { create } from 'zustand';
 import type { AppStore, AppState, StepType, EmailStatus, InterviewSchedule, ImportStatus } from '../types';
-import { mockCandidates, mockInterviewers, mockPositions, mockInterviewRounds, mockTemplates } from '../data/mockData';
-import { parseCandidates, parseInterviewers } from '../services/fileParser';
+import { mockCandidates, mockInterviewers, mockPositions, mockInterviewRounds, mockTemplates, DEFAULT_COMPANY_NAME, DEFAULT_CONTACT_INFO } from '../data/mockData';
+import { parseCandidates, parseInterviewers, generatePositionsFromData, generateInterviewRoundsFromData } from '../services/fileParser';
 import { runMatching } from '../services/matcher';
 import { runVerification } from '../services/verifier';
 import { generateEmails, regenerateEmail } from '../services/emailGenerator';
+
+const defaultTemplates = mockTemplates;
 
 const initialState: AppState = {
   candidates: [],
@@ -12,7 +14,7 @@ const initialState: AppState = {
   positions: [],
   interviewRounds: [],
   schedules: [],
-  templates: [],
+  templates: defaultTemplates,
   generatedEmails: [],
   currentStep: 'import' as StepType,
   importStatus: {
@@ -23,6 +25,18 @@ const initialState: AppState = {
   verifyResults: [],
   generateProgress: 0,
   selectedEmailId: null as string | null,
+};
+
+const syncBaseData = (state: Partial<AppState>) => {
+  const candidates = state.candidates || [];
+  const interviewers = state.interviewers || [];
+  
+  if (candidates.length > 0 || interviewers.length > 0) {
+    const positions = generatePositionsFromData(candidates, interviewers);
+    const interviewRounds = generateInterviewRoundsFromData(positions, interviewers);
+    return { positions, interviewRounds };
+  }
+  return { positions: [], interviewRounds: [] };
 };
 
 export const useAppStore = create<AppStore>((set, get) => ({
@@ -37,9 +51,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
     try {
       const result = await parseCandidates(file);
       if (result.success) {
+        const state = { ...get(), candidates: result.data };
+        const baseData = syncBaseData(state);
         set({
           candidates: result.data,
+          positions: baseData.positions,
+          interviewRounds: baseData.interviewRounds,
           importStatus: { ...get().importStatus, candidates: 'success' },
+          schedules: [],
+          generatedEmails: [],
+          verifyResults: [],
         });
       } else {
         set({ importStatus: { ...get().importStatus, candidates: 'error' } });
@@ -54,9 +75,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
     try {
       const result = await parseInterviewers(file);
       if (result.success) {
+        const state = { ...get(), interviewers: result.data };
+        const baseData = syncBaseData(state);
         set({
           interviewers: result.data,
+          positions: baseData.positions,
+          interviewRounds: baseData.interviewRounds,
           importStatus: { ...get().importStatus, interviewers: 'success' },
+          schedules: [],
+          generatedEmails: [],
+          verifyResults: [],
         });
       } else {
         set({ importStatus: { ...get().importStatus, interviewers: 'error' } });
@@ -64,6 +92,34 @@ export const useAppStore = create<AppStore>((set, get) => ({
     } catch {
       set({ importStatus: { ...get().importStatus, interviewers: 'error' } });
     }
+  },
+
+  clearCandidates: () => {
+    const state = { ...get(), candidates: [] };
+    const baseData = syncBaseData(state);
+    set({
+      candidates: [],
+      positions: baseData.positions,
+      interviewRounds: baseData.interviewRounds,
+      importStatus: { ...get().importStatus, candidates: 'idle' },
+      schedules: [],
+      generatedEmails: [],
+      verifyResults: [],
+    });
+  },
+
+  clearInterviewers: () => {
+    const state = { ...get(), interviewers: [] };
+    const baseData = syncBaseData(state);
+    set({
+      interviewers: [],
+      positions: baseData.positions,
+      interviewRounds: baseData.interviewRounds,
+      importStatus: { ...get().importStatus, interviewers: 'idle' },
+      schedules: [],
+      generatedEmails: [],
+      verifyResults: [],
+    });
   },
 
   loadMockData: () => {
@@ -77,12 +133,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
         candidates: 'success',
         interviewers: 'success',
       },
+      schedules: [],
+      generatedEmails: [],
+      verifyResults: [],
     });
   },
 
   runMatching: async () => {
     const state = get();
-    set({ parseProgress: 0 });
+    set({ parseProgress: 0, schedules: [], verifyResults: [], generatedEmails: [] });
     await new Promise((resolve) => setTimeout(resolve, 500));
     const result = runMatching(
       {
@@ -138,6 +197,26 @@ export const useAppStore = create<AppStore>((set, get) => ({
     });
   },
 
+  resolveConflict: (conflictId: string) => {
+    const state = get();
+    
+    const updatedVerifyResults = state.verifyResults.map((c) =>
+      c.id === conflictId ? { ...c, resolved: true } : c
+    );
+    
+    const updatedSchedules = state.schedules.map((schedule) => ({
+      ...schedule,
+      conflicts: schedule.conflicts.map((c) =>
+        c.id === conflictId ? { ...c, resolved: true } : c
+      ),
+    }));
+    
+    set({
+      verifyResults: updatedVerifyResults,
+      schedules: updatedSchedules,
+    });
+  },
+
   generateEmails: async () => {
     const state = get();
     set({ generateProgress: 0 });
@@ -152,6 +231,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         templates: state.templates,
       },
       {
+        types: ['candidate_invite', 'interviewer_notice', 'reschedule'],
         onProgress: (progress) => {
           set({ generateProgress: progress });
         },

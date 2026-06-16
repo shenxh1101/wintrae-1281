@@ -35,6 +35,7 @@ export const VerifyModule: React.FC = () => {
     runVerification,
     setCurrentStep,
     updateSchedule,
+    resolveConflict,
   } = useAppStore();
 
   const [hasRun, setHasRun] = useState(false);
@@ -67,12 +68,14 @@ export const VerifyModule: React.FC = () => {
     }
   };
 
-  const groupedConflicts = getConflictsByType(verifyResults);
-  const { errors, warnings } = getConflictSeverityCount(verifyResults);
+  const unresolvedConflicts = verifyResults.filter((c) => !c.resolved);
+  
+  const groupedConflicts = getConflictsByType(unresolvedConflicts);
+  const { errors, warnings } = getConflictSeverityCount(unresolvedConflicts);
 
   const filteredConflicts =
     activeFilter === 'all'
-      ? verifyResults
+      ? unresolvedConflicts
       : groupedConflicts[activeFilter] || [];
 
   const isReady = schedules.length > 0;
@@ -99,10 +102,10 @@ export const VerifyModule: React.FC = () => {
 
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
         <StatsCard
-          title="总问题数"
-          value={verifyResults.length}
+          title="待处理问题"
+          value={unresolvedConflicts.length}
           icon={<AlertCircle size={20} />}
-          variant={verifyResults.length > 0 ? 'warning' : 'success'}
+          variant={unresolvedConflicts.length > 0 ? 'warning' : 'success'}
         />
         <StatsCard
           title="错误"
@@ -179,7 +182,7 @@ export const VerifyModule: React.FC = () => {
                           {filter.label}
                           <span className="ml-1">
                             ({filter.type === 'all'
-                              ? verifyResults.length
+                              ? unresolvedConflicts.length
                               : groupedConflicts[filter.type as ConflictType]?.length || 0})
                           </span>
                         </button>
@@ -265,11 +268,7 @@ export const VerifyModule: React.FC = () => {
                         variant="primary"
                         size="sm"
                         onClick={() => {
-                          if (selectedConflict.scheduleId) {
-                            updateSchedule(selectedConflict.scheduleId, {
-                              conflicts: [],
-                            });
-                          }
+                          resolveConflict(selectedConflict.id);
                           setSelectedConflict(null);
                         }}
                       >
@@ -291,7 +290,7 @@ export const VerifyModule: React.FC = () => {
 
           <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-lg p-4">
             <div className="flex items-center gap-3">
-              {verifyResults.length === 0 ? (
+              {unresolvedConflicts.length === 0 ? (
                 <>
                   <div className="bg-emerald-100 p-2 rounded-lg">
                     <CheckCircle2 size={20} className="text-emerald-600" />
@@ -299,7 +298,7 @@ export const VerifyModule: React.FC = () => {
                   <div>
                     <p className="font-medium text-emerald-800">核对通过</p>
                     <p className="text-sm text-emerald-600">
-                      所有面试安排均已通过检查，可以生成邮件
+                      所有问题已处理，可以生成邮件
                     </p>
                   </div>
                 </>
@@ -311,7 +310,7 @@ export const VerifyModule: React.FC = () => {
                   <div>
                     <p className="font-medium text-amber-800">存在待处理问题</p>
                     <p className="text-sm text-amber-600">
-                      发现 {errors} 个错误和 {warnings} 个警告，建议先处理后再继续
+                      还有 {unresolvedConflicts.length} 个问题待处理（{errors} 个错误，{warnings} 个警告）
                     </p>
                   </div>
                 </>

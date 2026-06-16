@@ -14,6 +14,12 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  Layers,
+  List,
+  ChevronDown,
+  ChevronUp,
+  User,
+  CalendarClock,
 } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { Button } from '@/components/ui/Button';
@@ -21,7 +27,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { StatsCard } from '@/components/shared/StatsCard';
 import { EmailPreview } from '@/components/shared/EmailPreview';
-import type { GeneratedEmail, TemplateType, EmailStatus } from '@/types';
+import type { GeneratedEmail, TemplateType, EmailStatus, Candidate, InterviewSchedule } from '@/types';
 import { EMAIL_STATUS_LABELS } from '@/types';
 import { exportEmails } from '@/services/emailGenerator';
 import { formatDateTime } from '@/utils/dateUtils';
@@ -41,6 +47,8 @@ const statusVariants: Record<EmailStatus, 'success' | 'warning' | 'info' | 'defa
 
 export const ReviewModule: React.FC = () => {
   const {
+    candidates,
+    schedules,
     generatedEmails,
     selectedEmailId,
     selectEmail,
@@ -52,6 +60,8 @@ export const ReviewModule: React.FC = () => {
   const [filterType, setFilterType] = useState<TemplateType | 'all'>('all');
   const [filterStatus, setFilterStatus] = useState<EmailStatus | 'all'>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [viewMode, setViewMode] = useState<'list' | 'grouped'>('list');
+  const [expandedCandidates, setExpandedCandidates] = useState<Set<string>>(new Set());
 
   const filteredEmails = useMemo(() => {
     return generatedEmails.filter((email) => {
@@ -60,6 +70,51 @@ export const ReviewModule: React.FC = () => {
       return true;
     });
   }, [generatedEmails, filterType, filterStatus]);
+
+  const getCandidateId = (scheduleId: string): string | null => {
+    const schedule = schedules.find((s) => s.id === scheduleId);
+    return schedule?.candidateId || null;
+  };
+
+  const getCandidate = (candidateId: string): Candidate | undefined => {
+    return candidates.find((c) => c.id === candidateId);
+  };
+
+  const getSchedule = (scheduleId: string): InterviewSchedule | undefined => {
+    return schedules.find((s) => s.id === scheduleId);
+  };
+
+  const groupedByCandidate = useMemo(() => {
+    const groups: Array<{
+      candidateId: string;
+      candidateName: string;
+      emails: GeneratedEmail[];
+    }> = [];
+
+    const candidateEmailMap = new Map<string, GeneratedEmail[]>();
+    
+    filteredEmails.forEach((email) => {
+      const candidateId = getCandidateId(email.scheduleId);
+      if (candidateId) {
+        if (!candidateEmailMap.has(candidateId)) {
+          candidateEmailMap.set(candidateId, []);
+        }
+        candidateEmailMap.get(candidateId)!.push(email);
+      }
+    });
+
+    candidateEmailMap.forEach((emails, candidateId) => {
+      const candidate = getCandidate(candidateId);
+      groups.push({
+        candidateId,
+        candidateName: candidate?.name || candidateId,
+        emails,
+      });
+    });
+
+    groups.sort((a, b) => a.candidateName.localeCompare(b.candidateName, 'zh-CN'));
+    return groups;
+  }, [filteredEmails, schedules, candidates]);
 
   const selectedEmail = useMemo(() => {
     return generatedEmails.find((e) => e.id === selectedEmailId) || filteredEmails[0] || null;
@@ -75,7 +130,8 @@ export const ReviewModule: React.FC = () => {
     const reviewed = generatedEmails.filter((e) => e.status === 'reviewed').length;
     const candidateInvites = generatedEmails.filter((e) => e.type === 'candidate_invite').length;
     const interviewerNotices = generatedEmails.filter((e) => e.type === 'interviewer_notice').length;
-    return { total, ready, skipped, draft, reviewed, candidateInvites, interviewerNotices };
+    const reschedule = generatedEmails.filter((e) => e.type === 'reschedule').length;
+    return { total, ready, skipped, draft, reviewed, candidateInvites, interviewerNotices, reschedule };
   }, [generatedEmails]);
 
   const handleStatusChange = (id: string, status: 'ready' | 'skipped') => {
@@ -115,13 +171,12 @@ export const ReviewModule: React.FC = () => {
   };
 
   const handleExport = () => {
-    const readyEmails = generatedEmails.filter((e) => e.status === 'ready');
-    const csv = exportEmails(readyEmails);
+    const csv = exportEmails(generatedEmails);
     const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `待发送邮件列表_${new Date().toISOString().split('T')[0]}.csv`;
+    link.download = `邮件列表_${new Date().toISOString().split('T')[0]}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -142,7 +197,20 @@ export const ReviewModule: React.FC = () => {
     { type: 'all', label: '全部' },
     { type: 'candidate_invite', label: '候选人邀请' },
     { type: 'interviewer_notice', label: '面试官通知' },
+    { type: 'reschedule', label: '改期通知' },
   ];
+
+  const toggleCandidateExpand = (candidateId: string) => {
+    setExpandedCandidates((prev) => {
+      const next = new Set(prev);
+      if (next.has(candidateId)) {
+        next.delete(candidateId);
+      } else {
+        next.add(candidateId);
+      }
+      return next;
+    });
+  };
 
   const statusFilters: { status: EmailStatus | 'all'; label: string }[] = [
     { status: 'all', label: '全部状态' },
@@ -173,7 +241,7 @@ export const ReviewModule: React.FC = () => {
         </Button>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
         <StatsCard
           title="邮件总数"
           value={stats.total}
@@ -210,12 +278,44 @@ export const ReviewModule: React.FC = () => {
           icon={<Users size={20} />}
           variant="default"
         />
+        <StatsCard
+          title="改期通知"
+          value={stats.reschedule}
+          icon={<CalendarClock size={20} />}
+          variant="default"
+        />
       </div>
 
       <Card>
         <CardHeader>
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-            <CardTitle>待确认邮件列表</CardTitle>
+            <div className="flex items-center gap-3">
+              <CardTitle>待确认邮件列表</CardTitle>
+              <div className="flex items-center bg-slate-100 rounded-lg p-0.5">
+                <button
+                  onClick={() => setViewMode('list')}
+                  className={`px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1.5 ${
+                    viewMode === 'list'
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <List size={14} />
+                  列表视图
+                </button>
+                <button
+                  onClick={() => setViewMode('grouped')}
+                  className={`px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1.5 ${
+                    viewMode === 'grouped'
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Layers size={14} />
+                  按候选人分组
+                </button>
+              </div>
+            </div>
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-1">
                 <span className="text-sm text-slate-500 mr-2">类型：</span>
@@ -281,7 +381,7 @@ export const ReviewModule: React.FC = () => {
         <CardContent className="p-0">
           <div className="flex h-[600px]">
             <div className="w-1/2 border-r border-slate-200 overflow-y-auto">
-              {filteredEmails.length > 0 ? (
+              {viewMode === 'list' && filteredEmails.length > 0 ? (
                 <div className="divide-y divide-slate-200">
                   {filteredEmails.map((email, index) => (
                     <div
@@ -332,6 +432,80 @@ export const ReviewModule: React.FC = () => {
                       </div>
                     </div>
                   ))}
+                </div>
+              ) : viewMode === 'grouped' && groupedByCandidate.length > 0 ? (
+                <div className="divide-y divide-slate-200">
+                  {groupedByCandidate.map((group) => {
+                    const isExpanded = expandedCandidates.has(group.candidateId);
+                    return (
+                      <div key={group.candidateId}>
+                        <div
+                          onClick={() => toggleCandidateExpand(group.candidateId)}
+                          className="p-3 bg-slate-50 cursor-pointer hover:bg-slate-100 transition-colors flex items-center gap-2"
+                        >
+                          {isExpanded ? (
+                            <ChevronUp size={16} className="text-slate-500" />
+                          ) : (
+                            <ChevronDown size={16} className="text-slate-500" />
+                          )}
+                          <User size={18} className="text-slate-600" />
+                          <span className="font-medium text-slate-900">
+                            {group.candidateName}
+                          </span>
+                          <Badge variant="info" size="sm">
+                            {group.emails.length} 封邮件
+                          </Badge>
+                        </div>
+                        {isExpanded && (
+                          <div className="divide-y divide-slate-100">
+                            {group.emails.map((email) => (
+                              <div
+                                key={email.id}
+                                onClick={() => handleSelectEmail(email)}
+                                className={`pl-10 pr-4 py-3 cursor-pointer transition-colors ${
+                                  selectedEmail?.id === email.id
+                                    ? 'bg-blue-50 border-l-4 border-l-blue-600 pl-8'
+                                    : 'hover:bg-slate-50 border-l-4 border-l-transparent'
+                                }`}
+                              >
+                                <div className="flex items-start gap-3">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleToggleSelect(email.id);
+                                    }}
+                                    className="mt-0.5 p-0.5 hover:bg-slate-200 rounded"
+                                  >
+                                    {selectedIds.has(email.id) ? (
+                                      <CheckSquare size={16} className="text-blue-600" />
+                                    ) : (
+                                      <Square size={16} className="text-slate-400" />
+                                    )}
+                                  </button>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <Badge variant="info" size="sm">
+                                        {typeLabels[email.type]}
+                                      </Badge>
+                                      <Badge variant={statusVariants[email.status]} size="sm">
+                                        {EMAIL_STATUS_LABELS[email.status]}
+                                      </Badge>
+                                    </div>
+                                    <p className="text-sm font-medium text-slate-900 truncate">
+                                      {email.subject}
+                                    </p>
+                                    <p className="text-xs text-slate-500 mt-1">
+                                      收件人：{email.to}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="h-full flex flex-col items-center justify-center text-slate-500">
@@ -496,7 +670,7 @@ export const ReviewModule: React.FC = () => {
                   </p>
                 </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div className="bg-white rounded-lg p-3 border border-emerald-200">
                   <p className="text-sm text-slate-500">候选人邀请</p>
                   <p className="text-xl font-bold text-slate-900">
@@ -507,6 +681,12 @@ export const ReviewModule: React.FC = () => {
                   <p className="text-sm text-slate-500">面试官通知</p>
                   <p className="text-xl font-bold text-slate-900">
                     {generatedEmails.filter((e) => e.type === 'interviewer_notice' && e.status === 'ready').length}
+                  </p>
+                </div>
+                <div className="bg-white rounded-lg p-3 border border-emerald-200">
+                  <p className="text-sm text-slate-500">改期通知</p>
+                  <p className="text-xl font-bold text-slate-900">
+                    {generatedEmails.filter((e) => e.type === 'reschedule' && e.status === 'ready').length}
                   </p>
                 </div>
                 <div className="bg-white rounded-lg p-3 border border-emerald-200">

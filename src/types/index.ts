@@ -75,6 +75,7 @@ export interface ConflictInfo {
   description: string;
   relatedIds: string[];
   scheduleId?: string;
+  resolved?: boolean;
 }
 
 export interface InterviewSchedule {
@@ -143,9 +144,12 @@ export interface AppActions {
   setCurrentStep: (step: StepType) => void;
   importCandidates: (file: File) => Promise<void>;
   importInterviewers: (file: File) => Promise<void>;
+  clearCandidates: () => void;
+  clearInterviewers: () => void;
   loadMockData: () => void;
   runMatching: () => Promise<void>;
   runVerification: () => void;
+  resolveConflict: (conflictId: string) => void;
   generateEmails: () => Promise<void>;
   updateSchedule: (id: string, updates: Partial<InterviewSchedule>) => void;
   updateEmailStatus: (id: string, status: EmailStatus) => void;
